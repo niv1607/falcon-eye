@@ -1,0 +1,209 @@
+meta:
+  spec_name: Decision Intelligence Platform (Evidence Ledger)
+  language_ui: he-IL
+  rtl_required: true
+  created_date: '2026-02-24'
+  version: 1.1.0
+  change_log:
+  - נוספה לוגיקת סריקה מלאה (Fast Filter) + טריגרים לכניסה לפייפליין
+  - נוספו הגדרות אות (Signal Definitions) לכל אחד מ-4 המנועים
+  - נוספו סליידרים (Defaults + טווחים) ל-Risk Lab לכיוונון מבוקר (C)
+scan_pipeline:
+  universe_size: 400
+  cadence:
+    daily_scan: once_per_trading_day
+    intraday_scan: optional_stage1_candidate_pool_only
+    manual_scan: on_demand
+  fast_filter:
+    computed_metrics:
+    - name: delta_1d_pct
+      desc: שינוי יומי באחוזים
+    - name: delta_5d_pct
+      desc: שינוי 5 ימים באחוזים
+    - name: gap_pct
+      desc: פער פתיחה מול סגירה קודמת
+    - name: vol_ratio_20
+      desc: מחזור היום / ממוצע 20 יום
+    - name: atr_14_pct
+      desc: ATR(14)/Price
+    - name: vol_20
+      desc: סטיית תקן 20 יום
+    - name: rsi_14
+      desc: RSI(14)
+    entry_triggers_any_of:
+    - id: price_shock
+      rule: abs(delta_1d_pct) >= price_shock_pct
+    - id: move_5d
+      rule: abs(delta_5d_pct) >= move_5d_pct
+    - id: gap
+      rule: abs(gap_pct) >= gap_pct
+    - id: volume_spike
+      rule: vol_ratio_20 >= vol_ratio_threshold
+    - id: volatility_high
+      rule: atr_14_pct >= atr_pct_min
+    - id: rsi_extreme
+      rule: rsi_14 <= rsi_low OR rsi_14 >= rsi_high
+    expected_output_per_day:
+      candidate_pool: 30-60 assets (avg)
+  master_funnel_targets:
+    after_engines: 5-10 assets
+    deep_checked: 3-5 assets
+    final: Tier A 0-1 + Tier B 0-2
+engines_definitions:
+  momentum:
+    goal: לזהות פריצה/המשך מגמה עם איכות גבוהה ורעש נמוך
+    signals:
+      breakout_default:
+        conditions_all:
+        - close > highest_close(lookback_breakout_days)
+        - vol_ratio_20 >= momentum_vol_ratio_min
+        - atr_14_pct >= momentum_atr_pct_min
+        - 'optional: close > ema(20) if momentum_requires_above_ema20'
+        anti_noise:
+        - abs(delta_1d_pct) < momentum_max_daily_move_pct (avoid overextended candles)
+        confirmation_for_tier_A:
+        - 'either: second_close_above_breakout_level'
+        - 'or: successful_retest_of_breakout_level'
+  mean_reversion:
+    goal: לזהות דיסלוקציה ותיקון צפוי תוך מניעת 'תפיסת סכין'
+    signals:
+      dislocation_any_of:
+      - zscore_20 <= mr_zscore_threshold
+      - rsi_14 <= mr_rsi_low
+      - gap_down_pct >= mr_gap_down_pct
+      - three_red_candles_and_drop_pct >= mr_3red_drop_pct
+      default_requires_confirmation: true
+      confirmation_any_of:
+      - bullish_engulfing
+      - pin_bar_reversal
+      - higher_low
+      - close_above_ema(5)
+      - close_above_ema(10)
+      early_exception_path:
+        enabled: true
+        requires_all:
+        - CS >= 85
+        - Eq >= 8.5
+        - Hs >= 8
+        - no_hard_stop
+        entry_fraction_max: 0.33
+        notes: הוספות רק אחרי אישור טכני
+  event:
+    goal: לזהות שינוי מצב מהותי (דוח/רגולציה/גיאופוליטי) עם אימות ראיות
+    signals:
+      data_supported_any_of:
+      - earnings_surprise_pct >= event_earnings_surprise_min
+      - guidance_change_pct >= event_guidance_change_min
+      - margin_or_revenue_change_vs_prior >= event_fundamental_change_min
+      source_supported_any_of:
+      - news_tagged_grade_A_or_B_present
+      - regulatory_notice_grade_A_present
+      tier_A_requires:
+      - verification_gate_defined(metric, expected_direction, horizon_date)
+      - min_sources >= evidence_min_sources_default
+  core:
+    goal: ליבה ארוכת טווח (איכות/ערך) עם תהליך קשיח וחשיפה מבוקרת
+    signals:
+      watchlist_any_of:
+      - quality_screen_pass
+      - valuation_gap_detected
+      - fundamental_trend_positive
+      tier_A_requires_all:
+      - CS >= core_cs_min
+      - core_exposure_within_caps
+      - hard_stop_defined(thesis_break_conditions)
+risk_lab_sliders:
+  fast_filter_thresholds:
+    price_shock_pct:
+      default: 3.0
+      min: 2.0
+      max: 6.0
+    move_5d_pct:
+      default: 8.0
+      min: 5.0
+      max: 15.0
+    gap_pct:
+      default: 5.0
+      min: 3.0
+      max: 10.0
+    vol_ratio_threshold:
+      default: 1.8
+      min: 1.3
+      max: 3.0
+    atr_pct_min:
+      default: 2.0
+      min: 1.0
+      max: 4.0
+    rsi_low:
+      default: 30
+      min: 20
+      max: 35
+    rsi_high:
+      default: 70
+      min: 65
+      max: 80
+  momentum:
+    lookback_breakout_days:
+      default: 20
+      min: 15
+      max: 55
+    momentum_vol_ratio_min:
+      default: 1.5
+      min: 1.2
+      max: 2.5
+    momentum_atr_pct_min:
+      default: 1.5
+      min: 1.0
+      max: 3.0
+    momentum_max_daily_move_pct:
+      default: 10.0
+      min: 6.0
+      max: 15.0
+    momentum_requires_above_ema20:
+      default: true
+      type: bool
+  mean_reversion:
+    mr_zscore_threshold:
+      default: -2.0
+      min: -3.0
+      max: -1.5
+    mr_rsi_low:
+      default: 25
+      min: 20
+      max: 35
+    mr_gap_down_pct:
+      default: 7.0
+      min: 4.0
+      max: 12.0
+    mr_3red_drop_pct:
+      default: 8.0
+      min: 5.0
+      max: 15.0
+  event:
+    event_earnings_surprise_min:
+      default: 5.0
+      min: 2.0
+      max: 15.0
+    event_guidance_change_min:
+      default: 5.0
+      min: 2.0
+      max: 20.0
+    event_fundamental_change_min:
+      default: 5.0
+      min: 2.0
+      max: 25.0
+  core:
+    core_cs_min:
+      default: 80
+      min: 75
+      max: 90
+  evidence:
+    evidence_min_sources_default:
+      default: 5
+      min: 5
+      max: 10
+notes_for_implementation:
+  approach: C — ספים התחלתיים קשיחים + טווחי סליידרים ב-Risk Lab לכיוונון מבוקר בלי
+    'לשבור' את השיטה
+  logging: כל שינוי סליידר/סף נשמר עם version_id והסבר השלכות
+  ui: המשתמש רואה רק 0-1 Tier A + 0-2 Tier B; כל השאר מאחורי הקלעים
